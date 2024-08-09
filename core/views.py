@@ -1,6 +1,7 @@
 from django.shortcuts import render
 from django.http import JsonResponse
 from firebase_admin import firestore, auth
+
 # Create your views here.
 import json
 from django.views.decorators.csrf import csrf_exempt
@@ -13,6 +14,8 @@ from dotenv import load_dotenv
 load_dotenv()
 
 openai.api_key = os.getenv("OPENAI_API_KEY")
+firebase_web_api_key = os.getenv("FIREBASE_WEB_API_KEY")
+
 
 def front(request):
     context = {}
@@ -33,9 +36,9 @@ def create_user(email, password):
     try:
         user = auth.create_user(email=email, password=password)
         print(user.uid)
-        return JsonResponse({'success': True})
+        return JsonResponse({"success": True})
     except Exception as e:
-        return JsonResponse({'success': False, 'message': str(e)})
+        return JsonResponse({"success": False, "message": str(e)})
 
 
 @csrf_exempt
@@ -45,29 +48,27 @@ def login(request):
     password = data.get("password")
     try:
         user = auth.get_user_by_email(email)
+
         response = requests.post(
-            os.getenv("FIREBASE_APT_IN_VIEW"),
-            data=json.dumps({
-                'email': email,
-                'password': password,
-                'returnSecureToken': True
-            }),
-            headers={'Content-Type': 'application/json'}, timeout=20
+            url=f"https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key={firebase_web_api_key}",
+            data=json.dumps(
+                {"email": email, "password": password, "returnSecureToken": True}
+            ),
+            headers={"Content-Type": "application/json"},
         )
 
-        if response.status_code == 200:
-            response_data = response.json()
-            USER_UID = response_data["localId"]
-            request.session["uid"] = USER_UID
-            request.session.save()
-            return JsonResponse({"success": True})
-        else:
-            return JsonResponse({"error": "there was an error"})
-    except Exception as e:
-        if e.code == "NOT_FOUND":
-            return create_user(email, password)
-        else:
-            return JsonResponse({"error": "Cannot Create user "})
+        if "error" in response.json():
+            return JsonResponse(
+                {"success": False, "error": "incorrect email and password combination"}
+            )
+
+        request.session["uid"] = user.uid
+        request.session.save()
+        return JsonResponse({"success": True})
+    except ValueError:
+        return JsonResponse({"error": "email is not in valid format"})
+    except auth.UserNotFoundError:
+        return JsonResponse({"error": f"user with email {email} does not exist"})
 
 
 @csrf_exempt
@@ -76,9 +77,7 @@ def writing(request):
     name = data.get("name")
     database = firestore.client()
     user_collection = database.collection("users")
-    user_collection.document(name).set({
-        "name": name
-    })
+    user_collection.document(name).set({"name": name})
     return JsonResponse({"stuff": request.session.get("uid")})
 
 
@@ -101,7 +100,7 @@ def get_chatgpt_response(request):
             ambiance = data.get("ambiance")
             start_message = {
                 "role": "user",
-                "content": "Let the interview begin. Greet me first and then start asking me question stay with your role."
+                "content": "Let the interview begin. Greet me first and then start asking me question stay with your role.",
             }
             initial_message = {
                 "role": "system",
@@ -111,13 +110,11 @@ def get_chatgpt_response(request):
             messages.append(start_message)
         else:
             text = data.get("text")
-            new_message = {
-                "role": "user",
-                "content": text
-            }
+            new_message = {"role": "user", "content": text}
             messages.append(new_message)
         chatgpt_response = openai.ChatCompletion.create(
-            model="gpt-3.5-turbo", messages=messages)
+            model="gpt-3.5-turbo", messages=messages
+        )
         return JsonResponse({"response": chatgpt_response})
     else:
         return JsonResponse({"error": "Invalid request method"})
