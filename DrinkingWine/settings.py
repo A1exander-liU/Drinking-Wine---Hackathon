@@ -21,6 +21,7 @@ load_dotenv()
 
 port = int(os.environ.get("PORT", 8000))
 
+# firebase oroject > project settings > service accounts > gen new private key
 cred = credentials.Certificate("./secretKey.json")
 firebase_admin.initialize_app(cred)
 
